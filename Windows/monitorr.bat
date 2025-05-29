@@ -1,113 +1,14 @@
 @echo off
-:loop
 setlocal enabledelayedexpansion
 
-set ARCHIVO_SALIDA=reporte_recursos.txt
-
-echo ======================== > %ARCHIVO_SALIDA%
-echo Escaneando recursos del sistema... >> %ARCHIVO_SALIDA%
-echo ======================== >> %ARCHIVO_SALIDA%
-
-:: 1. Uso del CPU
-echo. >> %ARCHIVO_SALIDA%
-for /f "tokens=2 delims==" %%C in ('wmic cpu get loadpercentage /value') do (
-    set CPU=%%C
-)
-echo Uso del CPU: %CPU%%% >> %ARCHIVO_SALIDA%
-
-:: 2. Uso de la memoria RAM
-echo. >> %ARCHIVO_SALIDA%
-for /f "tokens=2 delims==" %%A in ('wmic os get FreePhysicalMemory^ /value') do (
-	set FreeMem=%%A
-)
-for /f "tokens=2 delims==" %%B in ('wmic os get TotalVisibleMemorySize /value') do (
-	set TotalMem=%%B
-)
-set /a UsedMem=100 - (100 * FreeMem / TotalMem)
-echo Uso de la memoria RAM: %UsedMem%%% >> %ARCHIVO_SALIDA%
-
-:: 3. Espacio de los discos
-echo. >> %ARCHIVO_SALIDA%
-echo Uso de los discos: >> %ARCHIVO_SALIDA%
-for /f "skip=1 tokens=1 delims=," %%A in ('wmic logicaldisk get FreeSpace^,Size /format:csv') do (
-    set Drive=%%A
-)
-for /f "skip=1 tokens=3 delims=," %%C in ('wmic logicaldisk get FreeSpace^,Size /format:csv') do (
-    set Size=%%C
-)
-echo Tamaño del disco: %Size% >> %ARCHIVO_SALIDA%
-for /f "skip=1 tokens=2 delims=," %%B in ('wmic logicaldisk get FreeSpace^,Size /format:csv') do (
-    set FreeSpace=%%B
-)
-echo Espacio libre en el disco: %FreeSpace% >> %ARCHIVO_SALIDA%
-
-:: Usamos PowerShell para calcular el espacio usado y el porcentaje de uso
-for /f %%P in ('powershell -command "([math]::Round(((%Size% - %FreeSpace%) / %Size%) * 100, 2))"') do (
-    set Porcentaje=%%P
-)
-
-echo Disco !Drive!: !Porcentaje!%% de uso >> %ARCHIVO_SALIDA%
-
-:: 4. Uso de la GPU (para sistemas con NVIDIA)
-echo. >> %ARCHIVO_SALIDA%
-echo Uso de la GPU: >> %ARCHIVO_SALIDA%
-where nvidia-smi > nul 2>nul
-if "!errorlevel!" equ "0" (
-    echo Información de la GPU NVIDIA: >> %ARCHIVO_SALIDA%
-    nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.free --format=csv,noheader >> %ARCHIVO_SALIDA%
-	for /f "delims=" %%A in ('nvidia-smi --query-gpu=utilization.gpu --format=csv') do (
-        	set gpu_utilization=%%A
-    	)
-) else (
-    echo No se detectó una GPU NVIDIA. Intentando con wmic... >> %ARCHIVO_SALIDA%
-    wmic path win32_videocontroller get caption,loadpercentage >> %ARCHIVO_SALIDA%
-	set gpu_utilization=0
-)
-
-echo. >> %ARCHIVO_SALIDA%
-echo == INFORMACIÓN DE PROCESOS Y MEMORIA == >> %ARCHIVO_SALIDA%
-tasklist >> %ARCHIVO_SALIDA%
-
-
-echo. >> %ARCHIVO_SALIDA%
-echo ======================== >> %ARCHIVO_SALIDA%
-echo Escaneo completado. >> %ARCHIVO_SALIDA%
-echo ======================== >> %ARCHIVO_SALIDA%
-echo La información se ha guardado en %ARCHIVO_SALIDA%
-
-
-
-set DesktopPath=%USERPROFILE%\Desktop
-
-
-if "%CPU%" geq "90" (
-	powershell -Command "$Shortcut = (New-Object -COM WScript.Shell).CreateShortcut('%DesktopPath%\Alerta.lnk'); $Shortcut.TargetPath = 'C:\Proyecto analisis\reporte_recursos.txt'; $Shortcut.IconLocation = 'C:\Proyecto analisis\alerta.ico'; $Shortcut.Save()"
-	cscript "C:\Proyecto analisis\alerta.vbs"
-	goto correo
-)
-if "%UsedMem%" geq "90" (
-	powershell -Command "$Shortcut = (New-Object -COM WScript.Shell).CreateShortcut('%DesktopPath%\Alerta.lnk'); $Shortcut.TargetPath = 'C:\Proyecto analisis\reporte_recursos.txt'; $Shortcut.IconLocation = 'C:\Proyecto analisis\alerta.ico'; $Shortcut.Save()"
-	cscript "C:\Proyecto analisis\alerta.vbs"
-	goto correo
-)
-if "%Porcentaje%" geq "80" (
-	powershell -Command "$Shortcut = (New-Object -COM WScript.Shell).CreateShortcut('%DesktopPath%\Alerta.lnk'); $Shortcut.TargetPath = 'C:\Proyecto analisis\reporte_recursos.txt'; $Shortcut.IconLocation = 'C:\Proyecto analisis\alerta.ico'; $Shortcut.Save()"
-	cscript "C:\Proyecto analisis\alerta.vbs"
-	goto correo
-)
-if "%gpu_utilization%" geq "80" (
-	powershell -Command "$Shortcut = (New-Object -COM WScript.Shell).CreateShortcut('%DesktopPath%\Alerta.lnk); $Shortcut.TargetPath = 'C:\Proyecto analisis\reporte_recursos.txt'; $Shortcut.IconLocation = 'C:\Proyecto analisis\alerta.ico'; $Shortcut.Save()"
-	cscript "C:\Proyecto analisis\alerta.vbs"´
-	goto correo
-)
-
-timeout /t 600 /nobreak >nul
-
-goto loop
-
-EXIT /B
-:correo
-:: Configurar las credenciales de correo (Tu correo de envío)
+REM === CONFIGURACIÓN CENTRALIZADA ===
+set "ARCHIVO_SALIDA=%~dp0reporte_recursos.txt"
+set "ARCHIVO_LOG=%~dp0monitorr_error.log"
+set "LIMITE_CPU=90"
+set "LIMITE_RAM=90"
+set "LIMITE_DISCO=80"
+set "DesktopPath=%USERPROFILE%\Desktop"
+set "PROCESOS=chrome.exe explorer.exe svchost.exe"
 set "emailto=Enviar correo electrónico a"
 set "emailFrom=Correo electrónico de"
 set "emailSubject=Analisis de recursos de %USERPROFILE%"
@@ -117,7 +18,86 @@ set "smtpPort=587"
 set "emailUser=CORREO QUE ENVIA"
 set "emailPassword=---------"
 
-:: PowerShell para enviar el correo
+REM === LIMPIEZA DE ARCHIVOS ANTIGUOS ===
+if exist "%ARCHIVO_SALIDA%" del "%ARCHIVO_SALIDA%"
+
+REM === INICIO DEL MONITOREO ===
+:loop
+REM Inicializar variables para este ciclo
+set "MaxDisco=0"
+
+REM Limpiar archivo de salida
+echo ==== REPORTE DE RECURSOS ==== > "%ARCHIVO_SALIDA%"
+echo Fecha y hora: %date% %time% >> "%ARCHIVO_SALIDA%"
+
+REM --- CPU ---
+where wmic >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] wmic no encontrado >> "%ARCHIVO_LOG%"
+    echo No se puede obtener el uso de CPU. >> "%ARCHIVO_SALIDA%"
+    set "CPU=0"
+) else (
+    for /f "skip=1 tokens=2 delims== " %%A in ('wmic cpu get loadpercentage /value') do (
+        if not "%%A"=="" set "CPU=%%A"
+    )
+    echo CPU: %CPU%%% >> "%ARCHIVO_SALIDA%"
+)
+
+REM --- RAM ---
+for /f "skip=1 tokens=2 delims== " %%A in ('wmic OS get FreePhysicalMemory /value') do (
+    if not "%%A"=="" set "FreeMem=%%A"
+)
+for /f "skip=1 tokens=2 delims== " %%A in ('wmic computersystem get TotalPhysicalMemory /value') do (
+    if not "%%A"=="" set "TotalMem=%%A"
+)
+REM Convertir a MB y calcular porcentaje usado
+set /a UsedMemMB=(TotalMem/1024-FreeMem/1024)
+set /a UsedMemPerc=100-((FreeMem*100)/(TotalMem/1024))
+echo RAM usada: !UsedMemMB! MB (!UsedMemPerc!%%) >> "%ARCHIVO_SALIDA%"
+
+REM --- DISCO (todas las unidades) ---
+echo. >> "%ARCHIVO_SALIDA%"
+echo === USO DE DISCO === >> "%ARCHIVO_SALIDA%"
+for /f "skip=1 tokens=1,2,3 delims=," %%A in ('wmic logicaldisk get DeviceID^,FreeSpace^,Size /format:csv') do (
+    if not "%%A"=="" (
+        set "Unidad=%%B"
+        set "FreeSpace=%%C"
+        set "Size=%%D"
+        if defined Unidad if defined FreeSpace if defined Size (
+            set /a UsedSpace=Size-FreeSpace
+            set /a UsedPerc=(UsedSpace*100)/Size
+            echo Disco !Unidad!: !UsedPerc!%% usado >> "%ARCHIVO_SALIDA%"
+            REM Guardar el mayor porcentaje para alerta
+            if !UsedPerc! gtr !MaxDisco! set MaxDisco=!UsedPerc!
+        )
+    )
+)
+if not defined MaxDisco set MaxDisco=0
+
+REM --- PROCESOS PRINCIPALES ---
+echo. >> "%ARCHIVO_SALIDA%"
+echo === PROCESOS PRINCIPALES === >> "%ARCHIVO_SALIDA%"
+tasklist /FI "STATUS eq running" | findstr /I "%PROCESOS%" >> "%ARCHIVO_SALIDA%"
+
+REM === CHEQUEO DE ALERTAS ===
+if %CPU% geq %LIMITE_CPU% goto alerta
+if !UsedMemPerc! geq %LIMITE_RAM% goto alerta
+if !MaxDisco! geq %LIMITE_DISCO% goto alerta
+
+REM Esperar 60 segundos antes de repetir
+timeout /t 60 >nul
+goto loop
+
+:alerta
+REM --- CREAR ACCESO DIRECTO Y MOSTRAR ALERTA ---
+if not exist "%DesktopPath%\Alerta.lnk" (
+    powershell -Command "$s=(New-Object -COM WScript.Shell).CreateShortcut('%DesktopPath%\Alerta.lnk');$s.TargetPath='%ARCHIVO_SALIDA%';$s.IconLocation='%~dp0alerta.ico';$s.Save()" 2>>"%ARCHIVO_LOG%"
+)
+cscript "%~dp0alerta.vbs" 2>>"%ARCHIVO_LOG%"
+goto correo
+
+:correo
+REM --- ENVÍO DE CORREO Y MANEJO DE ERRORES ---
 powershell -NoProfile -Command ^
     "$emailFrom = '%emailFrom%';" ^
     "$emailTo = '%emailTo%';" ^
@@ -135,7 +115,7 @@ powershell -NoProfile -Command ^
         "Write-Host 'Correo enviado exitosamente.'" ^
     "} catch {" ^
         "Write-Host 'Error al enviar el correo:' $_.Exception.Message;" ^
+        "Add-Content -Path '%ARCHIVO_LOG%' -Value ('[' + (Get-Date) + '] Error al enviar el correo: ' + $_.Exception.Message)" ^
     "}"
+timeout /t 300 >nul
 goto loop
-
-endlocal
